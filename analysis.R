@@ -45,7 +45,6 @@ latlong2county=function(pointsDF) {
 
 
 clean_234_df = function(fpath, year){
-  
   #These are error due to recorder or devices, so I don't want them
   drop_codes = c("ERROR: QUIT BY USER",
                 "connect_error1",
@@ -59,8 +58,6 @@ clean_234_df = function(fpath, year){
                  "timeout")
   
   df = read_excel(fpath, sheet = "Test Results")
-  colkeep = NULL
-  latlong_col = NULL
   if(year == 2012 | year == 2013){
     colkeep = c("NORMALIZED_LAT", "NORMALIZED_LONG", "Census 2010 Designation", 
                           "Provider", "wTCP_DOWN1", "wTCP_DOWN2", 
@@ -151,7 +148,7 @@ clean_567_df = function(fpath, year){
   zero_codes = c("no effective service",
                  "timeout", 
                  "bad_output")
-  if (year == "2017"){
+  if (year == 2017){
     df = read_excel(fpath, sheet = "Fall 2017 Results")
   }else{
     df = read_excel(fpath, sheet = "Test Results")
@@ -214,18 +211,72 @@ clean_567_df = function(fpath, year){
 }
 
 
+df_2012 = clean_234_df("calspeed2012.xlsx", year = 2012)
+df_2013 = clean_234_df("calspeed2013.xlsx", year = 2013)
+df_2014 = clean_234_df("calspeed2014.xlsx", year = 2014)
 
-
-df_2012 = clean_234_df("calspeed2012.xlsx", year = "2012")
-df_2013 = clean_234_df("calspeed2013.xlsx", year = "2013")
-df_2014 = clean_234_df("calspeed2014.xlsx", year = "2014")
-
-df_2015 = clean_567_df("calspeed2015.xlsx", year = "2015")
-df_2016 = clean_567_df("calspeed2016.xlsx", year = "2016")
-df_2017 = clean_567_df("calspeed2017.xlsx", year = "2017")
+df_2015 = clean_567_df("calspeed2015.xlsx", year = 2015)
+df_2016 = clean_567_df("calspeed2016.xlsx", year = 2016)
+df_2017 = clean_567_df("calspeed2017.xlsx", year = 2017)
 
 #Bind and group_by manipulations
 
 
 
-#Clean FBI Data
+#Clean hate crime Data
+
+#read in data
+cali_df = read_csv("HATE_2001-2018_0.csv")
+cali_df = cali_df[, c(1:7)]
+cali_df = cali_df %>% filter(ClosedYear >= 2012,
+                             ClosedYear <= 2017)
+cali_df = cali_df %>% group_by(County, ClosedYear) %>% summarise(totalv = sum(TotalNumberOfVictims),
+                                                           totalind =sum(TotalNumberOfIndividualVictims))
+#read in codes
+
+county_codes = read_excel("code_mapping_county.xlsx", sheet= "Sheet1")
+county_codes = county_codes[, c("CntyCode", "County")]
+
+#sanity check
+count(unique(county_codes$CntyCode)) == count(unique(county_codes$County))
+
+#lowercase and clean the county column
+county_codes$County = str_to_lower(county_codes$County)
+county_codes$County = gsub(" county", "", county_codes$County)
+
+#merge em
+
+cali_df = merge(cali_df, county_codes, by.x = "County", by.y = "CntyCode")
+
+
+#population?
+#https://factfinder.census.gov/faces/nav/jsf/pages/guided_search.xhtml
+
+
+
+#scale it
+
+
+
+#merge with internet data, done
+
+
+
+
+
+
+#ANALYSIS
+
+#summary statistics, distributions, etc
+
+#boxplots, ggplots, pretty as they can be
+
+#create geomap?
+
+#Model Generation
+
+#lm models
+
+#conclusion
+
+
