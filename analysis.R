@@ -120,8 +120,8 @@ clean_234_df = function(fpath, year){
   #unique(df$county)
   df = df[str_detect(df$county, "california"),]
   df$county = gsub("california,", "", df$county)
-  
-  
+  df$year = year
+  df = dplyr::select(df, county, year, wtcp_down, etcp_down)
   return(df)
 }
 
@@ -207,7 +207,10 @@ clean_567_df = function(fpath, year){
   #unique(df$county)
   df = df[str_detect(df$county, "california"),]
   df$county = gsub("california,", "", df$county)
+  df$year = year
+  df = dplyr::select(df, county, year, wtcp_down, etcp_down)
   return(df)
+
 }
 
 
@@ -222,54 +225,133 @@ df_2017 = clean_567_df("calspeed2017.xlsx", year = 2017)
 #Bind and group_by manipulations
 
 
+mobile_internet_df = bind_rows(df_2012, df_2013, df_2014, df_2015, df_2016, df_2017)
+
+mobile_internet_df = mobile_internet_df %>% group_by(county, year) %>%
+  summarise(wtcp_down_mean = mean(wtcp_down), 
+            etcp_down_mean = mean(etcp_down),
+            wtcp_down_med = median(wtcp_down),
+            etcp_down_med = median(etcp_down))
+
 
 #Clean hate crime Data
 
-#read in data
-cali_df = read_csv("HATE_2001-2018_0.csv")
-cali_df = cali_df[, c(1:7)]
-cali_df = cali_df %>% filter(ClosedYear >= 2012,
-                             ClosedYear <= 2017)
-cali_df = cali_df %>% group_by(County, ClosedYear) %>% summarise(totalv = sum(TotalNumberOfVictims),
-                                                           totalind =sum(TotalNumberOfIndividualVictims))
-#read in codes
+ret_hc_data = function(){
+  cali_df = read_csv("HATE_2001-2018_0.csv")
+  cali_df = cali_df[, c(1:7)]
+  cali_df = cali_df %>% filter(ClosedYear >= 2012,
+                               ClosedYear <= 2017)
+  cali_df = cali_df %>% group_by(County, ClosedYear) %>% summarise(totalv = sum(TotalNumberOfVictims),
+                                                                   totalind =sum(TotalNumberOfIndividualVictims))
+  #read in codes
+  
+  county_codes = read_excel("code_mapping_county.xlsx", sheet= "Sheet1")
+  county_codes = county_codes[, c("CntyCode", "County")]
+  
+  #sanity check
+  count(unique(county_codes$CntyCode)) == count(unique(county_codes$County))
+  
+  #lowercase and clean the county column
+  county_codes$County = str_to_lower(county_codes$County)
+  county_codes$County = gsub(" county", "", county_codes$County)
+  county_codes= county_codes %>% group_by(County) %>% summarise(code = max(CntyCode))
+  #merge em
+  
+  cali_df = merge(cali_df, county_codes, by.x = "County", by.y = "code")
+  
+  
+  #population?
+  #https://factfinder.census.gov/faces/nav/jsf/pages/guided_search.xhtml
+  county_pops = read_csv("population_counts.csv")
+  #Prepare dataframe for merging
+  county_pops = county_pops %>% rename(county = `GEO.display-label`,
+                                       pop2012 = respop72012,
+                                       pop2013 = respop72013,
+                                       pop2014 = respop72014,
+                                       pop2015 = respop72015,
+                                       pop2016 = respop72016,
+                                       pop2017 = respop72017) 
+  county_pops = dplyr::select(county_pops, county, pop2012,
+                              pop2013, pop2014, pop2015, pop2016, pop2017)
+  county_pops$county = gsub(" County,", "", county_pops$county)
+  county_pops$county = gsub(" California", "", county_pops$county)
+  county_pops$county = str_to_lower(county_pops$county)
+  
+  #Tricky part. Have to move from long format to tidy format
+  county_pops_collapsed = county_pops %>% gather(pYear,pop, pop2012:pop2017)
+  county_pops_collapsed$pYear = as.numeric(gsub("pop", "", county_pops_collapsed$pYear))
+  #merge on pyear, ClosedYear, and county names.
+  
+  cali_hc_df = merge(cali_df, county_pops_collapsed, by.x = c("County.y", "ClosedYear"),
+                     by.y = c("county", "pYear"))
+  
+  #usually, per 100,000 is the rate used for crimes
+  cali_hc_df$hc_capita = ((cali_hc_df$totalind) /(cali_hc_df$pop)) * 100000 
+  return(cali_hc_df)
+}
 
-county_codes = read_excel("code_mapping_county.xlsx", sheet= "Sheet1")
-county_codes = county_codes[, c("CntyCode", "County")]
 
-#sanity check
-count(unique(county_codes$CntyCode)) == count(unique(county_codes$County))
-
-#lowercase and clean the county column
-county_codes$County = str_to_lower(county_codes$County)
-county_codes$County = gsub(" county", "", county_codes$County)
-
-#merge em
-
-cali_df = merge(cali_df, county_codes, by.x = "County", by.y = "CntyCode")
+cali_hc_df = ret_hc_data()
 
 
-#population?
-#https://factfinder.census.gov/faces/nav/jsf/pages/guided_search.xhtml
-
-
-
-#scale it
-
-
-
-#merge with internet data, done
-
-
-
-
-
+#Merge with internet data, and summarize in a fashion that is appropriate
+df = merge(cali_hc_df, mobile_internet_df, by.x = c("ClosedYear","County.y"),
+           by.y = c("year", "county"))
 
 #ANALYSIS
+df$ClosedYear = as.factor(df$ClosedYear) 
+
+#What is the distribution of internet speeds?
+#Rescalled to mbs?
+
+#Does hate crime increase over time?
+
+#Does internet speed increase over time?
+
+#Is internet speed predictive of hate crime?
+
+
+
+#linear model development
+#model generation
+
+m1 <- lm(hc_capita ~ wtcp_down_mean, data = df)
+summary(m1)
+
+m2 <- lm(hc_capita ~ etcp_down_mean, data = df)
+summary(m2)
+
+m_fixed_eff <- lm(hc_capita ~ wtcp_down_mean + as.factor(ClosedYear) + as.factor(County.y), data = df)
+summary(m_fixed_eff)
+
+m3 <- lm(hc_capita ~ wtcp_down_mean + as.factor(ClosedYear), data = df)
+
+m4 <- lm(hc_capita ~ wtcp_down_mean + as.factor(County.y), data = df)
+
+summary(m3)
+summary(m4)
 
 #summary statistics, distributions, etc
 
+cor(drop_na(df)[,c("ClosedYear", "hc_capita","wtcp_down_mean","wtcp_down_med")])
+
+ggplot(df %>% filter(), aes(y = hc_capita, x = wtcp_down_mean/1000, color = ClosedYear)) +geom_point() + scale_color_brewer(palette = "Set2")
+
+
+ggparcoord(df, columns = c(7:11),
+           groupColumn = 1,
+           scale = "std") +scale_color_brewer(palette = "Set2") 
+#redo
+ggplot(df, aes(x = reorder(County.y, ClosedYear), y = wtcp_down_mean)) +
+  theme(axis.text.x=element_text(angle=90,hjust=1)) + xlab("California Counties") +
+  ylab("Download speed, in kilobytes/sec")+ ggtitle("Distribution of Download Speeds in California Counties") +
+  geom_boxplot() + theme(plot.title = element_text(hjust = 0.5))
+
 #boxplots, ggplots, pretty as they can be
+
+#create linear models for estimation. Deal with year by year or county vars
+
+
 
 #create geomap?
 
