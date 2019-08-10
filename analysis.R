@@ -64,7 +64,7 @@ clean_234_df = function(fpath, year){
                           "eTCP_DOWN1", "eTCP_DOWN2")
     df = df[df$`Census 2010 Designation` != "Tribal",]
     df = df[!(is.na(df$NORMALIZED_LAT) | is.na(df$NORMALIZED_LONG)),]
-    latlong_col = c("NORMALIZED_LAT", "NORMALIZED_LONG")
+    latlong_col = c("NORMALIZED_LONG", "NORMALIZED_LAT")
   } else {
     #2014 categories and filtering
     colkeep = c("Normalized_LAT", "Normalized_LONG", "Census 2012 Designation", 
