@@ -8,11 +8,12 @@ library(gdata)
 library(readxl)
 library(sp)
 library(maps)
+library(rgeos)
 library(maptools)
 library(stringr)
 
 #### Clean Internet Speed Data
-
+setwd("Personal Projects/ssi_capstone_revamp/")
 
 # Grabbed this function from a stack overflow post
 # god bless
@@ -29,11 +30,11 @@ latlong2county=function(pointsDF) {
   counties <- map('county', fill=TRUE, col="transparent", plot=FALSE)
   IDs <- sapply(strsplit(counties$names, ":"), function(x) x[1])
   counties_sp <- map2SpatialPolygons(counties, IDs=IDs,
-                                     proj4string=CRS("+proj=longlat +datum=wgs84"))
+                                     proj4string=CRS("+proj=longlat +datum=WGS84"))
   
   # Convert pointsDF to a SpatialPoints object 
   pointsSP <- SpatialPoints(pointsDF, 
-                            proj4string=CRS("+proj=longlat +datum=wgs84"))
+                            proj4string=CRS("+proj=longlat +datum=WGS84"))
   
   # Use 'over' to get _indices_ of the Polygons object containing each point 
   indices <- over(pointsSP, counties_sp)
@@ -238,9 +239,10 @@ mobile_internet_df = mobile_internet_df %>% group_by(county, year) %>%
 
 ret_hc_data = function(){
   cali_df = read_csv("HATE_2001-2018_0.csv")
+  length(unique(cali_df$County))
   cali_df = cali_df[, c(1:7)]
-  cali_df = cali_df %>% filter(ClosedYear >= 2012,
-                               ClosedYear <= 2017)
+  cali_df = cali_df %>% filter(between(ClosedYear, 2012, 2017))
+  length(unique(cali_df$County))
   cali_df = cali_df %>% group_by(County, ClosedYear) %>% summarise(totalv = sum(TotalNumberOfVictims),
                                                                    totalind =sum(TotalNumberOfIndividualVictims))
   #read in codes
@@ -249,16 +251,17 @@ ret_hc_data = function(){
   county_codes = county_codes[, c("CntyCode", "County")]
   
   #sanity check
-  count(unique(county_codes$CntyCode)) == count(unique(county_codes$County))
+  length(unique(county_codes$CntyCode)) == length(unique(county_codes$County))
   
   #lowercase and clean the county column
   county_codes$County = str_to_lower(county_codes$County)
   county_codes$County = gsub(" county", "", county_codes$County)
   county_codes= county_codes %>% group_by(County) %>% summarise(code = max(CntyCode))
   #merge em
+  length(unique(county_codes$code))
   
   cali_df = merge(cali_df, county_codes, by.x = "County", by.y = "code")
-  
+  print(length(unique(cali_df$County)))
   
   #population?
   #https://factfinder.census.gov/faces/nav/jsf/pages/guided_search.xhtml
@@ -300,8 +303,21 @@ df = merge(cali_hc_df, mobile_internet_df, by.x = c("ClosedYear","County.y"),
 
 #ANALYSIS
 df$ClosedYear = as.factor(df$ClosedYear) 
+length(unique(df$County.y))
+
+
+
+#Make sure to impute zeros where necessary for Hate Crime specifically
+
+#make sure that all counties are accounted for. If not, label with zeros across the board
+
+#make sure to note missing county data: Sierra reported no hate crimes betewen 2012-2017
+
+#Create maps, bivariate, and maybe create maps to test spatial hypotheses?
+
 
 #What is the distribution of internet speeds?
+
 #Rescalled to mbs?
 
 #Does hate crime increase over time?
@@ -309,6 +325,12 @@ df$ClosedYear = as.factor(df$ClosedYear)
 #Does internet speed increase over time?
 
 #Is internet speed predictive of hate crime?
+
+#plot data over time, and w.r.t each county?
+
+#Model development
+
+#Add context variables for analysis after model development + reaffirm null
 
 
 
@@ -331,11 +353,28 @@ m4 <- lm(hc_capita ~ wtcp_down_mean + as.factor(County.y), data = df)
 summary(m3)
 summary(m4)
 
+
+library(maptools)
+library(gpclib)  # may be needed, may not be
+
+# MAP
+cali_map <- readShapeSpatial("CA_Counties/CA_Counties_TIGER2016.shp")
+plot(cali_map)
+cali_map = fortify(cali_map)
+cali_map$NAME = str_to_lower(cali_map$NAME)
+cali_map$region = cali_map$NAME
+
+df %>% filter(ClosedYear == 2014) %>% summarise(max(hc_capita))
+
+ggplot() + geom_map(data = df %>% filter(ClosedYear == 2017), aes(map_id = County.y, fill = hc_capita), 
+                      map = cali_map) + expand_limits(x = cali_map$long, y = cali_map$lat) + 
+  scale_fill_gradient(low = "white", high = "red", limits = c(0, 30))
+
 #summary statistics, distributions, etc
 
 cor(drop_na(df)[,c("ClosedYear", "hc_capita","wtcp_down_mean","wtcp_down_med")])
 
-ggplot(df %>% filter(), aes(y = hc_capita, x = wtcp_down_mean/1000, color = ClosedYear)) +geom_point() + scale_color_brewer(palette = "Set2")
+ggplot(df %>% filter(), aes(y = hc_capita, x = ClosedYear, color = County.y)) +geom_point() + scale_color_brewer(palette = "Set2")
 
 
 ggparcoord(df, columns = c(7:11),
