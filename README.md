@@ -1,2 +1,2 @@
 # ssi_capstone_revamp
-Hate Crime and Internet Speed R Markdown exploration. Variant of original SSI capstone
+Currently W.I.P. This is a variation and extension of a project I worked on in college. In this project, I postulate and investigate a relationship between mobile internet download speed and hate crime incidence (per 100,000 persons) in Californian counties. I use data from the CALSPEED mobile internet testing website, and hate crime data from the government of California. Feel free to look at my scripts as I work on this project. 
