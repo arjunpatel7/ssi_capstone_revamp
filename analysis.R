@@ -15,10 +15,10 @@ library(stringr)
 #### Clean Internet Speed Data
 setwd("Personal Projects/ssi_capstone_revamp/")
 
-# Grabbed this function from a stack overflow post
-# god bless
+# Grabbed this function from a stack overflow post, located here. 
 # https://stackoverflow.com/questions/13316185/r-convert-zipcode-or-lat-long-to-county
 
+# Comments from original post:
 
 # The single argument to this function, pointsDF, is a data.frame in which:
 #   - column 1 contains the longitude in degrees (negative in the US)
@@ -243,10 +243,15 @@ ret_hc_data = function(){
   cali_df = cali_df[, c(1:7)]
   cali_df = cali_df %>% filter(between(ClosedYear, 2012, 2017))
   length(unique(cali_df$County))
+  
   cali_df = cali_df %>% group_by(County, ClosedYear) %>% summarise(totalv = sum(TotalNumberOfVictims),
                                                                    totalind =sum(TotalNumberOfIndividualVictims))
-  #read in codes
+  #cali_df$County = as.numeric(cali_df$County)
+  cali_df = cali_df %>% complete(ClosedYear = 2012:2017)
   
+  
+  #need to fill in counties that don't exist. How can I do that? 
+  #read in codes
   county_codes = read_excel("code_mapping_county.xlsx", sheet= "Sheet1")
   county_codes = county_codes[, c("CntyCode", "County")]
   
@@ -260,9 +265,42 @@ ret_hc_data = function(){
   #merge em
   length(unique(county_codes$code))
   
-  cali_df = merge(cali_df, county_codes, by.x = "County", by.y = "code")
+  #I contacted OpenJustice and they told me that only counties that report at least one hate crime
+  #are in the dataset. This means counties that aren't or those that are missing values for certain years
+  #didn't have any hate crimes to report. We can set those to NA here:
+  
+  cali_df = merge(cali_df, county_codes, by.x = "County", by.y = "code", all.x = TRUE, all.y = TRUE)
+  #check to see this worked, length should be 58.
   print(length(unique(cali_df$County)))
   
+  mis_dates = cali_df %>% group_by(County.y) %>% filter(n() < 6) %>%ungroup()
+  
+  drop_county = mis_dates$County.y
+  cali_df = cali_df %>%filter(!County.y %in% drop_county)
+  mis_dates$ClosedYear = 2012
+  mis_dates$totalv = 0
+  mis_dates$totalind = 0
+  mis_dates = mis_dates %>% complete(ClosedYear = 2012:2017, County.y = County.y)
+  mis_dates$totalv = 0
+  mis_dates$totalind = 0
+  
+  #manually cleaning the remaining counties
+  mis_dates[mis_dates$County.y == "inyo",]$County = 14 
+  mis_dates[mis_dates$County.y == "lassen",]$County = 18 
+  mis_dates[mis_dates$County.y == "madera",]$County = 20 
+  mis_dates[mis_dates$County.y == "mariposa",]$County = 22 
+  mis_dates[mis_dates$County.y == "modoc",]$County =  25
+  mis_dates[mis_dates$County.y == "sierra",]$County =  46 
+  mis_dates[mis_dates$County.y == "siskiyou",]$County =  47 
+  mis_dates[mis_dates$County.y == "trinity",]$County = 53
+  
+  #now, merge them back. 
+  cali_df = bind_rows(cali_df, mis_dates)
+  cali_df[is.na(cali_df)] = 0
+  #sanity check
+  nrow(cali_df %>% group_by(County.y) %>% filter(n() < 6)) ==0
+
+
   #population?
   #https://factfinder.census.gov/faces/nav/jsf/pages/guided_search.xhtml
   county_pops = read_csv("population_counts.csv")
@@ -295,6 +333,7 @@ ret_hc_data = function(){
 
 
 cali_hc_df = ret_hc_data()
+
 
 
 #Merge with internet data, and summarize in a fashion that is appropriate
@@ -368,7 +407,7 @@ df %>% filter(ClosedYear == 2014) %>% summarise(max(hc_capita))
 
 ggplot() + geom_map(data = df %>% filter(ClosedYear == 2017), aes(map_id = County.y, fill = hc_capita), 
                       map = cali_map) + expand_limits(x = cali_map$long, y = cali_map$lat) + 
-  scale_fill_gradient(low = "white", high = "red", limits = c(0, 30))
+  scale_fill_gradient(low = "white", high = "red", limits = c(0, 15))
 
 #summary statistics, distributions, etc
 
