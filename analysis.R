@@ -11,9 +11,11 @@ library(maps)
 library(rgeos)
 library(maptools)
 library(stringr)
+library(gridExtra)
+library(tidycensus)
 
 #### Clean Internet Speed Data
-setwd("Personal Projects/ssi_capstone_revamp/")
+setwd("~/Desktop/Personal Projects/ssi_capstone_revamp/")
 
 # Grabbed this function from a stack overflow post, located here. 
 # https://stackoverflow.com/questions/13316185/r-convert-zipcode-or-lat-long-to-county
@@ -215,13 +217,13 @@ clean_567_df = function(fpath, year){
 }
 
 
-df_2012 = clean_234_df("calspeed2012.xlsx", year = 2012)
-df_2013 = clean_234_df("calspeed2013.xlsx", year = 2013)
-df_2014 = clean_234_df("calspeed2014.xlsx", year = 2014)
+df_2012 = na.omit(clean_234_df("calspeed2012.xlsx", year = 2012))
+df_2013 = na.omit(clean_234_df("calspeed2013.xlsx", year = 2013))
+df_2014 = na.omit(clean_234_df("calspeed2014.xlsx", year = 2014))
 
-df_2015 = clean_567_df("calspeed2015.xlsx", year = 2015)
-df_2016 = clean_567_df("calspeed2016.xlsx", year = 2016)
-df_2017 = clean_567_df("calspeed2017.xlsx", year = 2017)
+df_2015 = na.omit(clean_567_df("calspeed2015.xlsx", year = 2015))
+df_2016 = na.omit(clean_567_df("calspeed2016.xlsx", year = 2016))
+df_2017 = na.omit(clean_567_df("calspeed2017.xlsx", year = 2017))
 
 #Bind and group_by manipulations
 
@@ -331,10 +333,7 @@ ret_hc_data = function(){
   return(cali_hc_df)
 }
 
-
 cali_hc_df = ret_hc_data()
-
-
 
 #Merge with internet data, and summarize in a fashion that is appropriate
 df = merge(cali_hc_df, mobile_internet_df, by.x = c("ClosedYear","County.y"),
@@ -345,8 +344,72 @@ df$ClosedYear = as.factor(df$ClosedYear)
 length(unique(df$County.y))
 
 
+###Control variable input and cleaning
 
-#Make sure to impute zeros where necessary for Hate Crime specifically
+#white population
+
+w_props = read_csv("ACS_17_1YR_CP05/ACS_17_1YR_CP05.csv")
+
+#Desired Columns, using the given coding for the columns
+
+
+col_keep = c("GEO.display-label", "HC01_VC54", "HC02_VC54",
+             "HC04_VC54", "HC06_VC54", "HC08_VC54")
+w_props = w_props[, col_keep]
+w_props = w_props %>% dplyr::select(county = "GEO.display-label", w2017 = "HC01_VC54",
+                             w2016 = "HC02_VC54",
+                             w2015 = "HC04_VC54",
+                             w2014 = "HC06_VC54",
+                             w2013 = "HC08_VC54")
+w_props$county = gsub("County, California", "", w_props$county)
+w_props$county = str_to_lower(w_props$county)
+
+#unemployment
+unemp_df = read_excel("Unemployment.xls", sheet = "Unemployment Med HH Inc", skip = 7)
+unemp_df = unemp_df %>% filter(State == "CA", Area_name != "California")
+unemp_df$Area_name = gsub(" County, CA", "", unemp_df$Area_name)
+unemp_df$Area_name = str_to_lower(unemp_df$Area_name)
+unemp_df = unemp_df %>% dplyr::select(county = Area_name, unemp2012 = Unemployment_rate_2012,
+                                              unemp2013 = Unemployment_rate_2013,
+                                              unemp2014 = Unemployment_rate_2014,
+                                              unemp2015 = Unemployment_rate_2015,
+                                              unemp2016 = Unemployment_rate_2016,
+                                              unemp2017 = Unemployment_rate_2017)
+
+
+temp_df = merge(df, unemp_df, by.x = "County.y", by.y = "county")
+
+
+#unemployment
+
+#population in 2010, POC, white, etc
+#using tidycensus for the data
+
+#REMEMBER TO REMOVE THIS FOR PRIVACY REASONS
+census_api_key(key = "04c634ac703cfc40cceef49e4b8466ad06ccebe0")
+
+cali_pop_data = get_estimates(geography = "county", 
+                              product = "characteristics", 
+                              breakdown = c("RACE"),  
+                              breakdown_labels = TRUE, 
+                              state = "CA")
+#
+length(unique(cali_pop_data$NAME))
+cali_pop_data = cali_pop_data %>% spread(key = RACE, value = value)
+#old school for loop, cause I don't know yet how to do this in a vectorized fashion
+for(x in colnames(cali_pop_data)[4:14]){
+  #iterate over each column and normalize by total population
+  cali_pop_data[, x] = cali_pop_data[, x]/(cali_pop_data$`All races`)
+}
+
+
+
+#cali_pop_data[, c(2:14)] = (cali_pop_data[, c(2:14)])/cali_pop_data$`All races`
+##ARTICLE IDEA: present a hypothetical analysis of hate crime and encouch it in 
+## a description of the flimsyness of hate crime statistics
+## and statistics as deception
+
+
 
 #make sure that all counties are accounted for. If not, label with zeros across the board
 
@@ -371,16 +434,46 @@ length(unique(df$County.y))
 
 #Add context variables for analysis after model development + reaffirm null
 
+plot(hc_capita ~ wtcp_down_mean, data = df %>% filter(hc_capita != 0)) 
 
 
 #linear model development
 #model generation
 
-m1 <- lm(hc_capita ~ wtcp_down_mean, data = df)
+control_vars = read_csv("ca_county_agency_contextual_indicators_2009-2014_05-03-2016.csv")
+control_vars = control_vars %>% filter(agency_code == "All Combined") 
+control_vars$county = str_to_lower(control_vars$county)
+length(unique(control_vars$county))
+shortened_model = merge(control_vars, df, by.x = c("year", "county"), by.y = c("ClosedYear",
+                                                                               "County.y"))
+
+cor(shortened_model[shortened_model$hc_capita != 0, c("less_than_high_school", "per_capita_income",
+                        "poverty_rate", "unemployment_rate",
+                        "hc_capita",
+                        "wtcp_down_mean")])
+shortened_model$wtcp_down_mean = shortened_model$wtcp_down_mean / 1000
+
+shortened_model
+
+m1 = lm(hc_capita ~ wtcp_down_mean, data = shortened_model %>% filter(hc_capita !=0,
+                                                                      county != "los angeles"))
+summary(m1)
+
+plot(cooks.distance(m1))
+
+
+m2 = lm(hc_capita ~ wtcp_down_mean+ poverty_rate + less_than_high_school + 
+          per_capita_income + unemployment_rate, data = shortened_model %>% filter(hc_capita !=0))
+summary(m2) 
+
+m1 <- lm(hc_capita ~ wtcp_down_mean, data = df %>% filter(hc_capita != 0))
 summary(m1)
 
 m2 <- lm(hc_capita ~ etcp_down_mean, data = df)
 summary(m2)
+
+
+
 
 m_fixed_eff <- lm(hc_capita ~ wtcp_down_mean + as.factor(ClosedYear) + as.factor(County.y), data = df)
 summary(m_fixed_eff)
@@ -403,17 +496,30 @@ cali_map = fortify(cali_map)
 cali_map$NAME = str_to_lower(cali_map$NAME)
 cali_map$region = cali_map$NAME
 
-df %>% filter(ClosedYear == 2014) %>% summarise(max(hc_capita))
+df %>% filter(ClosedYear == 2017) %>% summarise(max(wtcp_down_mean))
 
-ggplot() + geom_map(data = df %>% filter(ClosedYear == 2017), aes(map_id = County.y, fill = hc_capita), 
+p1 = ggplot(df, frame = ClosedYear) + geom_map(data = df %>% filter(), aes(map_id = County.y, fill = wtcp_down_mean/1000), 
                       map = cali_map) + expand_limits(x = cali_map$long, y = cali_map$lat) + 
-  scale_fill_gradient(low = "white", high = "red", limits = c(0, 15))
+  scale_fill_gradient(low = "white", high = "sky blue", limits = c(0, 20))
+
+
+p2 = ggplot() + geom_map(data = df %>% filter(ClosedYear == 2017), aes(map_id = County.y, fill = hc_capita), 
+                         map = cali_map) + expand_limits(x = cali_map$long, y = cali_map$lat) + 
+  scale_fill_gradient(low = "white", high = "red", limits = c(0, 11))
+
+grid.arrange(p1, p2, nrow = 1, top = "Mobile Internet Download Speed and Hate Crime per 100,000 persons in California, 2017")
+
+
+
+
+
+
 
 #summary statistics, distributions, etc
 
 cor(drop_na(df)[,c("ClosedYear", "hc_capita","wtcp_down_mean","wtcp_down_med")])
 
-ggplot(df %>% filter(), aes(y = hc_capita, x = ClosedYear, color = County.y)) +geom_point() + scale_color_brewer(palette = "Set2")
+ggplot(df %>% filter(), aes(y = hc_capita, x = wtcp_down_mean/1000, color = ClosedYear)) +geom_point() + scale_color_brewer(palette = "Set2")
 
 
 ggparcoord(df, columns = c(7:11),
